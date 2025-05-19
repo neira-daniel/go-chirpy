@@ -9,6 +9,7 @@ import (
 func main() {
 	// create an HTTP request multiplexer
 	reqMux := http.NewServeMux()
+
 	// set server parameters
 	const port = 8080
 	server := &http.Server{
@@ -16,11 +17,13 @@ func main() {
 		Handler: reqMux,
 	}
 
-	// map the public web root of the server to `./public`
+	// map server folders for network access
 	webRoot := http.FileServer(http.Dir("./public"))
+	assets := http.FileServer(http.Dir("./assets"))
 	reqMux.Handle("/", webRoot)
+	reqMux.Handle("/assets/", http.StripPrefix("/assets/", assets))
 
-	log.Printf("server active on port %v\n", port)
 	// start the server
+	log.Printf("server is listening for requests on port %v\n", port)
 	log.Fatal(server.ListenAndServe())
 }
