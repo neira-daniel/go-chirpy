@@ -25,5 +25,11 @@ func main() {
 
 	// start the server
 	log.Printf("server is listening for requests on port %v\n", port)
-	log.Fatal(server.ListenAndServe())
+	if err := server.ListenAndServe(); err != nil {
+		if err != http.ErrServerClosed {
+			log.Fatal(fmt.Errorf("server failed: %w", err))
+		} else {
+			log.Println("server exited gracefully")
+		}
+	}
 }
