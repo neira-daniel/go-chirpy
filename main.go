@@ -8,23 +8,23 @@ import (
 
 func main() {
 	// create an HTTP request multiplexer
-	reqMux := http.NewServeMux()
+	mux := http.NewServeMux()
 
 	// set server parameters
 	const port = 8080
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%v", port),
-		Handler: reqMux,
+		Handler: mux,
 	}
 
 	// map server folders for network access
 	app := http.FileServer(http.Dir("./app"))
 	assets := http.FileServer(http.Dir("./assets"))
-	reqMux.Handle("/app/", http.StripPrefix("/app/", app))
-	reqMux.Handle("/app/assets/", http.StripPrefix("/app/assets/", assets))
+	mux.Handle("/app/", http.StripPrefix("/app/", app))
+	mux.Handle("/app/assets/", http.StripPrefix("/app/assets/", assets))
 
 	// register custom handler
-	reqMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(http.StatusText(http.StatusOK)))
