@@ -20,7 +20,7 @@
 !README.md
 !LICENSE
 
-!/public/index.html
+!index.html
 !/assets/logo.png
 
 # !Makefile

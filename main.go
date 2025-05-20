@@ -18,10 +18,17 @@ func main() {
 	}
 
 	// map server folders for network access
-	webRoot := http.FileServer(http.Dir("./public"))
+	app := http.FileServer(http.Dir("./app"))
 	assets := http.FileServer(http.Dir("./assets"))
-	reqMux.Handle("/", webRoot)
-	reqMux.Handle("/assets/", http.StripPrefix("/assets/", assets))
+	reqMux.Handle("/app/", http.StripPrefix("/app/", app))
+	reqMux.Handle("/app/assets/", http.StripPrefix("/app/assets/", assets))
+
+	// register custom handler
+	reqMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
 
 	// start the server
 	log.Printf("server is listening for requests on port %v\n", port)
