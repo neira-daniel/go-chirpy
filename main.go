@@ -19,10 +19,15 @@ func (cfg *apiConfig) middlewareMetricsIncrement(next http.Handler) http.Handler
 }
 
 func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Add("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
-	w.Write(fmt.Appendf(nil, "Hits: %v", cfg.fileserverHits.Load()))
+	w.Write(fmt.Appendf(nil, `<html>
+  <body>
+    <h1>Welcome, Chirpy Admin</h1>
+    <p>Chirpy has been visited %d times!</p>
+  </body>
+</html>`, cfg.fileserverHits.Load()))
 }
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, _ *http.Request) {
@@ -59,8 +64,8 @@ func main() {
 	mux.Handle("/app/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/", app)))
 	mux.Handle("/app/assets/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/assets/", assets)))
 	mux.HandleFunc("GET /api/healthz", handlerHealth)
-	mux.HandleFunc("GET /api/metrics", apiCfg.handlerMetrics)
-	mux.HandleFunc("POST /api/reset", apiCfg.handlerReset)
+	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
+	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 
 	// start the server
 	log.Printf("server is listening for requests on port %v\n", port)
