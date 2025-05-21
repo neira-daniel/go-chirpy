@@ -58,9 +58,9 @@ func main() {
 
 	mux.Handle("/app/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/", app)))
 	mux.Handle("/app/assets/", http.StripPrefix("/app/assets/", assets))
-	mux.HandleFunc("/healthz", handlerHealth)
-	mux.HandleFunc("/metrics", apiCfg.handlerMetrics)
-	mux.HandleFunc("/reset", apiCfg.handlerReset)
+	mux.HandleFunc("GET /healthz", handlerHealth)
+	mux.HandleFunc("GET /metrics", apiCfg.handlerMetrics)
+	mux.HandleFunc("POST /reset", apiCfg.handlerReset)
 
 	// start the server
 	log.Printf("server is listening for requests on port %v\n", port)
