@@ -57,7 +57,7 @@ func main() {
 	assets := http.FileServer(http.Dir("./assets"))
 
 	mux.Handle("/app/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/", app)))
-	mux.Handle("/app/assets/", http.StripPrefix("/app/assets/", assets))
+	mux.Handle("/app/assets/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/assets/", assets)))
 	mux.HandleFunc("GET /healthz", handlerHealth)
 	mux.HandleFunc("GET /metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /reset", apiCfg.handlerReset)
