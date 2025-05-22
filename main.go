@@ -42,12 +42,29 @@ func handlerHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte(http.StatusText(http.StatusOK)))
 }
 
-func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
-	type incomingJson struct {
-		Body string `json:"body"`
-	}
+func respondWithError(w http.ResponseWriter, statusCode int, context string, err error) {
 	type errorResponse struct {
 		Error string `json:"error"`
+	}
+	errorMessage := fmt.Sprint(fmt.Errorf("%v: %w", context, err))
+	respondWithJSON(w, statusCode, errorMessage)
+}
+
+func respondWithJSON(w http.ResponseWriter, statusCode int, payload any) {
+	jsonResponse, err := json.Marshal(payload)
+	if err != nil {
+		log.Println(fmt.Errorf("encoding JSON: %w", err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(statusCode)
+	w.Write(jsonResponse)
+}
+
+func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
+	type jsonRequest struct {
+		Body string `json:"body"`
 	}
 	type validResponse struct {
 		Valid bool `json:"valid"`
@@ -56,52 +73,21 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 	// we use JSON Decode instead of Unmarshal because we're dealing with a stream
 	// of data instead of a []byte in memory
 	decoder := json.NewDecoder(r.Body)
-	var jsonIN incomingJson
-	err := decoder.Decode(&jsonIN)
+	var data jsonRequest
+	err := decoder.Decode(&data)
 	if err != nil {
-		log.Println(fmt.Errorf("decoding JSON stream: %w", err))
-
-		answer := errorResponse{Error: "non-conforming JSON received"}
-		jsonData, err := json.Marshal(answer)
-		if err != nil {
-			log.Println(fmt.Errorf("encoding JSON error message: %w", err))
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write(jsonData)
-
+		log.Print(fmt.Errorf("[ error ] decoding JSON stream: %w", err))
+		respondWithError(w, http.StatusBadRequest, "non-conforming JSON received", err)
 		return
 	}
 
-	if chirp_length := len([]rune(jsonIN.Body)); chirp_length > 140 {
-		log.Println("refused chirp message: longer than 140 characters")
-
-		answer := errorResponse{Error: fmt.Sprintf("Chirp is too long (%d characters)", chirp_length)}
-		jsonData, err := json.Marshal(answer)
-		if err != nil {
-			log.Println(fmt.Errorf("encoding JSON error message: %w", err))
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write(jsonData)
-
+	const maxChirpLength = 140
+	if chirpLength := len([]rune(data.Body)); chirpLength > maxChirpLength {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Chirp is %d characters long", chirpLength), fmt.Errorf("remove, at least, %d characters to make it %d", chirpLength-maxChirpLength, maxChirpLength))
 		return
 	}
 
-	answer := validResponse{Valid: true}
-	jsonOut, err := json.Marshal(answer)
-	if err != nil {
-		log.Println(fmt.Errorf("encoding valid JSON message: %w", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	w.Write(jsonOut)
+	respondWithJSON(w, http.StatusOK, validResponse{Valid: true})
 }
 
 func main() {
