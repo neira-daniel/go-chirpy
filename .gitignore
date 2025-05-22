@@ -1,5 +1,7 @@
 # Source:
 # https://github.com/github/gitignore/blob/9d66dabafaf4ee6ad5126363b7ace1a46ee07850/community/Golang/Go.AllowList.gitignore
+#
+# Modified for the current project.
 
 # Allowlisting gitignore template for GO projects prevents us
 # from adding various unwanted local files, such as generated
@@ -16,6 +18,9 @@
 !*.go
 !go.sum
 !go.mod
+
+!*.sql
+!sqlc.yaml
 
 !README.md
 !LICENSE
