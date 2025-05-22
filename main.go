@@ -88,23 +88,31 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cleanedChirp := censorChirp(data.Body)
+	badWords := map[string]struct{}{
+		"kerfuffle": {},
+		"sharbert":  {},
+		"fornax":    {},
+	}
+	cleanedChirp := censorChirp(data.Body, badWords)
 
 	respondWithJSON(w, http.StatusOK, validResponse{CleanedBody: cleanedChirp})
 }
 
-func censorChirp(body string) string {
-	profane := map[string]string{"kerfuffle": "****", "sharbert": "****", "fornax": "****"}
-	cleanedChirp := []string{}
-	for _, word := range strings.Fields(body) {
-		replacement, ok := profane[strings.ToLower(word)]
+func censorChirp(message string, badWords map[string]struct{}) string {
+	// With strings.Fields we're splitting the message at every instance of 1+
+	// consecutive whitespace characters according to what's defined in
+	// unicode.IsSpace (where,  for example, \n is considered whitespace).
+	// The alternative: strings.Split(message, " "), where we'd split the message at
+	// every instance of " ".
+	// What to actually use in the end will depend on the app requirements.
+	words := strings.Fields(message)
+	for i, word := range words {
+		_, ok := badWords[strings.ToLower(word)]
 		if ok {
-			cleanedChirp = append(cleanedChirp, replacement)
-		} else {
-			cleanedChirp = append(cleanedChirp, word)
+			words[i] = "****"
 		}
 	}
-	return strings.Join(cleanedChirp, " ")
+	return strings.Join(words, " ")
 }
 
 func main() {
