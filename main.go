@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -67,7 +68,7 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 		Body string `json:"body"`
 	}
 	type validResponse struct {
-		Valid bool `json:"valid"`
+		CleanedBody string `json:"cleaned_body"`
 	}
 
 	// we use JSON Decode instead of Unmarshal because we're dealing with a stream
@@ -87,7 +88,23 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, validResponse{Valid: true})
+	cleanedChirp := censorChirp(data.Body)
+
+	respondWithJSON(w, http.StatusOK, validResponse{CleanedBody: cleanedChirp})
+}
+
+func censorChirp(body string) string {
+	profane := map[string]string{"kerfuffle": "****", "sharbert": "****", "fornax": "****"}
+	cleanedChirp := []string{}
+	for _, word := range strings.Fields(body) {
+		replacement, ok := profane[strings.ToLower(word)]
+		if ok {
+			cleanedChirp = append(cleanedChirp, replacement)
+		} else {
+			cleanedChirp = append(cleanedChirp, word)
+		}
+	}
+	return strings.Join(cleanedChirp, " ")
 }
 
 func main() {
