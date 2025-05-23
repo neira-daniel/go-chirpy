@@ -1,15 +1,31 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+	"github.com/neira-daniel/go-chirpy/internal/database"
 )
 
+type User struct {
+	Id        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
+}
+
 type apiConfig struct {
+	db             *database.Queries
 	fileserverHits atomic.Int32 // safe across goroutines
 }
 
@@ -115,7 +131,49 @@ func censorChirp(message string, badWords map[string]struct{}) string {
 	return strings.Join(words, " ")
 }
 
+func (cfg *apiConfig) handlerUser(w http.ResponseWriter, r *http.Request) {
+	type jsonRequest struct {
+		Email string `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	var data jsonRequest
+	err := decoder.Decode(&data)
+	if err != nil {
+		log.Print(fmt.Errorf("[ error ] decoding JSON stream: %w", err))
+		respondWithError(w, http.StatusBadRequest, "non-conforming JSON received", err)
+		return
+	}
+
+	user, err := cfg.db.CreateUser(r.Context(), data.Email)
+	if err != nil {
+		log.Print(fmt.Errorf("[ error ] creating new DB user for %q: %w", data.Email, err))
+		respondWithError(w, http.StatusInternalServerError, "database error: couldn't create user", err)
+		return
+	}
+
+	log.Printf("[  ok   ] user %q created", user.Email)
+	respondWithJSON(w, http.StatusCreated, User{
+		Id:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	})
+}
+
 func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Fatal(fmt.Errorf("[ error ] loading .env file: %w", err))
+	}
+
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatal(fmt.Errorf("[ error ] preparing database abstraction: %w", err))
+	}
+	defer db.Close()
+	dbQueries := database.New(db)
+
 	// create an HTTP request multiplexer
 	mux := http.NewServeMux()
 
@@ -128,6 +186,7 @@ func main() {
 
 	// declare and initialize server configuration
 	apiCfg := apiConfig{
+		db:             dbQueries,
 		fileserverHits: atomic.Int32{},
 	}
 
@@ -141,12 +200,13 @@ func main() {
 	mux.HandleFunc("POST /api/validate_chirp", handlerValidateChirp)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
+	mux.HandleFunc("POST /api/users", apiCfg.handlerUser)
 
 	// start the server
 	log.Printf("server is listening for requests on port %v\n", port)
 	if err := server.ListenAndServe(); err != nil {
 		if err != http.ErrServerClosed {
-			log.Fatal(fmt.Errorf("server failed: %w", err))
+			log.Fatal(fmt.Errorf("[ error ] server failed: %w", err))
 		} else {
 			log.Println("server exited gracefully")
 		}
