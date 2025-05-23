@@ -26,6 +26,7 @@ type User struct {
 
 type apiConfig struct {
 	db             *database.Queries
+	platform       string
 	fileserverHits atomic.Int32 // safe across goroutines
 }
 
@@ -48,9 +49,18 @@ func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, _ *http.Request) {
 </html>`, cfg.fileserverHits.Load()))
 }
 
-func (cfg *apiConfig) handlerReset(w http.ResponseWriter, _ *http.Request) {
-	cfg.fileserverHits.Store(0)
-	w.WriteHeader(http.StatusOK)
+func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
+	if cfg.platform != "dev" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	if err := cfg.db.ResetDatabase(r.Context()); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+	} else {
+		cfg.fileserverHits.Store(0)
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 func handlerHealth(w http.ResponseWriter, _ *http.Request) {
@@ -187,6 +197,7 @@ func main() {
 	// declare and initialize server configuration
 	apiCfg := apiConfig{
 		db:             dbQueries,
+		platform:       os.Getenv("PLATFORM"),
 		fileserverHits: atomic.Int32{},
 	}
 
