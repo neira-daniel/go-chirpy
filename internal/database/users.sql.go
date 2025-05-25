@@ -7,6 +7,8 @@ package database
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
 const createUser = `-- name: CreateUser :one
@@ -39,4 +41,34 @@ DELETE FROM users
 func (q *Queries) ResetDatabase(ctx context.Context) error {
 	_, err := q.db.ExecContext(ctx, resetDatabase)
 	return err
+}
+
+const saveChirp = `-- name: SaveChirp :one
+INSERT INTO chirps (id, created_at, updated_at, body, user_id)
+VALUES (
+    gen_random_uuid(),
+    now() AT TIME ZONE 'UTC',
+    now() AT TIME ZONE 'UTC',
+    $1,
+    $2
+)
+RETURNING id, created_at, updated_at, body, user_id
+`
+
+type SaveChirpParams struct {
+	Body   string
+	UserID uuid.UUID
+}
+
+func (q *Queries) SaveChirp(ctx context.Context, arg SaveChirpParams) (Chirp, error) {
+	row := q.db.QueryRowContext(ctx, saveChirp, arg.Body, arg.UserID)
+	var i Chirp
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Body,
+		&i.UserID,
+	)
+	return i, err
 }
