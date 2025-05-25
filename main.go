@@ -24,6 +24,14 @@ type User struct {
 	Email     string    `json:"email"`
 }
 
+type Chirp struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+	UserID    uuid.UUID `json:"user_id"`
+}
+
 type apiConfig struct {
 	db             *database.Queries
 	platform       string
@@ -89,12 +97,10 @@ func respondWithJSON(w http.ResponseWriter, statusCode int, payload any) {
 	w.Write(jsonResponse)
 }
 
-func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
+func validateChirp(w http.ResponseWriter, r *http.Request) (string, uuid.UUID, bool) {
 	type jsonRequest struct {
-		Body string `json:"body"`
-	}
-	type validResponse struct {
-		CleanedBody string `json:"cleaned_body"`
+		Body   string    `json:"body"`
+		UserId uuid.UUID `json:"user_id"`
 	}
 
 	// we use JSON Decode instead of Unmarshal because we're dealing with a stream
@@ -105,13 +111,13 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Print(fmt.Errorf("[ error ] decoding JSON stream: %w", err))
 		respondWithError(w, http.StatusBadRequest, "non-conforming JSON received", err)
-		return
+		return "", uuid.Nil, false
 	}
 
 	const maxChirpLength = 140
 	if chirpLength := len([]rune(data.Body)); chirpLength > maxChirpLength {
 		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Chirp is %d characters long", chirpLength), fmt.Errorf("remove, at least, %d characters to make it %d", chirpLength-maxChirpLength, maxChirpLength))
-		return
+		return "", uuid.Nil, false
 	}
 
 	badWords := map[string]struct{}{
@@ -121,7 +127,8 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 	}
 	cleanedChirp := censorChirp(data.Body, badWords)
 
-	respondWithJSON(w, http.StatusOK, validResponse{CleanedBody: cleanedChirp})
+	// respondWithJSON(w, http.StatusOK, validResponse{CleanedBody: cleanedChirp})
+	return cleanedChirp, data.UserId, true
 }
 
 func censorChirp(message string, badWords map[string]struct{}) string {
@@ -171,6 +178,28 @@ func (cfg *apiConfig) handlerUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
+	body, user_id, ok := validateChirp(w, r)
+	if !ok {
+		return
+	}
+	chirp, err := cfg.db.SaveChirp(r.Context(), database.SaveChirpParams{Body: body, UserID: user_id})
+	if err != nil {
+		log.Print(fmt.Errorf("[ error ] storing chirp in DB: %w", err))
+		respondWithError(w, http.StatusInternalServerError, "database error: couldn't store chirp", err)
+		return
+	}
+
+	log.Print("[  ok   ] chirp stored")
+	respondWithJSON(w, http.StatusCreated, Chirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
+	})
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal(fmt.Errorf("[ error ] loading .env file: %w", err))
@@ -208,7 +237,7 @@ func main() {
 	mux.Handle("/app/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/", app)))
 	mux.Handle("/app/assets/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/assets/", assets)))
 	mux.HandleFunc("GET /api/healthz", handlerHealth)
-	mux.HandleFunc("POST /api/validate_chirp", handlerValidateChirp)
+	mux.HandleFunc("POST /api/chirps", apiCfg.handlerChirps)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 	mux.HandleFunc("POST /api/users", apiCfg.handlerUser)
