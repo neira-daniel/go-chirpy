@@ -32,6 +32,16 @@ type Chirp struct {
 	UserID    uuid.UUID `json:"user_id"`
 }
 
+func addTagsToChirp(chirp database.Chirp) Chirp {
+	return Chirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
+	}
+}
+
 type apiConfig struct {
 	db             *database.Queries
 	platform       string
@@ -191,13 +201,23 @@ func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Print("[  ok   ] chirp stored")
-	respondWithJSON(w, http.StatusCreated, Chirp{
-		ID:        chirp.ID,
-		CreatedAt: chirp.CreatedAt,
-		UpdatedAt: chirp.UpdatedAt,
-		Body:      chirp.Body,
-		UserID:    chirp.UserID,
-	})
+	respondWithJSON(w, http.StatusCreated, addTagsToChirp(chirp))
+}
+
+func (cfg *apiConfig) handlerGETChirps(w http.ResponseWriter, r *http.Request) {
+	chirps, err := cfg.db.GetChirps(r.Context())
+	if err != nil {
+		log.Print(fmt.Errorf("[ error ] getting chirps from DB: %w", err))
+		respondWithError(w, http.StatusInternalServerError, "database error: couldn't retrieve chirps", err)
+		return
+	}
+
+	log.Print("[  ok   ] chirps served")
+	chirpsWithTags := make([]Chirp, len(chirps))
+	for i, chirp := range chirps {
+		chirpsWithTags[i] = addTagsToChirp(chirp)
+	}
+	respondWithJSON(w, http.StatusOK, chirpsWithTags)
 }
 
 func main() {
@@ -237,10 +257,11 @@ func main() {
 	mux.Handle("/app/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/", app)))
 	mux.Handle("/app/assets/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/assets/", assets)))
 	mux.HandleFunc("GET /api/healthz", handlerHealth)
+	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGETChirps)
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerChirps)
+	mux.HandleFunc("POST /api/users", apiCfg.handlerUser)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
-	mux.HandleFunc("POST /api/users", apiCfg.handlerUser)
 
 	// start the server
 	log.Printf("server is listening for requests on port %v\n", port)
