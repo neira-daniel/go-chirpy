@@ -225,6 +225,32 @@ func (cfg *apiConfig) handlerGETChirps(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, chirpsWithTags)
 }
 
+func (cfg *apiConfig) handlerGETChirpByID(w http.ResponseWriter, r *http.Request) {
+	match := r.PathValue("chirpID")
+	if match == "" {
+		log.Print("[ warning ] missing chirp ID in GET request")
+		respondWithError(w, http.StatusBadRequest, "request error: missing chirp ID", nil)
+		return
+	}
+
+	chirp_id, err := uuid.Parse(match)
+	if err != nil {
+		log.Print("[ warning ] not a valid chirp UUID in GET request")
+		respondWithError(w, http.StatusBadRequest, "request error: not a valid chirp UUID", err)
+		return
+	}
+
+	chirp, err := cfg.db.GetChirpByID(r.Context(), chirp_id)
+	if err != nil {
+		log.Print(fmt.Errorf("[ warning ] chirp id=%q not found: %w", chirp_id, err))
+		respondWithError(w, http.StatusNotFound, "chirp doesn't exist", err)
+		return
+	}
+
+	log.Print("[   ok    ] chirp served")
+	respondWithJSON(w, http.StatusOK, addTagsToChirp(chirp))
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal(fmt.Errorf("[ error ] loading .env file: %w", err))
@@ -263,6 +289,7 @@ func main() {
 	mux.Handle("/app/assets/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/assets/", assets)))
 	mux.HandleFunc("GET /api/healthz", handlerHealth)
 	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGETChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGETChirpByID)
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerChirps)
 	mux.HandleFunc("POST /api/users", apiCfg.handlerUser)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
