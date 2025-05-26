@@ -91,8 +91,13 @@ func respondWithError(w http.ResponseWriter, statusCode int, context string, err
 	type errorResponse struct {
 		Error string `json:"error"`
 	}
-	errorMessage := fmt.Sprint(fmt.Errorf("%v: %w", context, err))
-	respondWithJSON(w, statusCode, errorMessage)
+	var errorMessage string
+	if err != nil {
+		errorMessage = fmt.Sprint(fmt.Errorf("%v: %w", context, err))
+	} else {
+		errorMessage = context
+	}
+	respondWithJSON(w, statusCode, errorResponse{Error: errorMessage})
 }
 
 func respondWithJSON(w http.ResponseWriter, statusCode int, payload any) {
