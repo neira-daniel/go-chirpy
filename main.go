@@ -17,11 +17,27 @@ import (
 	"github.com/neira-daniel/go-chirpy/internal/database"
 )
 
+const (
+	successTag = "[ success ]"
+	warningTag = "[ warning ]"
+	errorTag   = "[  error  ]"
+	okTag      = "[   ok    ]"
+)
+
 type User struct {
 	Id        uuid.UUID `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+}
+
+func addTagsToUser(user database.User) User {
+	return User{
+		Id:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
 }
 
 type Chirp struct {
@@ -74,9 +90,11 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := cfg.db.ResetDatabase(r.Context()); err != nil {
+		log.Printf("%v resetting the database", errorTag)
 		w.WriteHeader(http.StatusInternalServerError)
 	} else {
 		cfg.fileserverHits.Store(0)
+		log.Printf("%v all database records were cleared", successTag)
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -87,23 +105,17 @@ func handlerHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte(http.StatusText(http.StatusOK)))
 }
 
-func respondWithError(w http.ResponseWriter, statusCode int, context string, err error) {
+func respondWithError(w http.ResponseWriter, statusCode int, message string) {
 	type errorResponse struct {
 		Error string `json:"error"`
 	}
-	var errorMessage string
-	if err != nil {
-		errorMessage = fmt.Sprint(fmt.Errorf("%v: %w", context, err))
-	} else {
-		errorMessage = context
-	}
-	respondWithJSON(w, statusCode, errorResponse{Error: errorMessage})
+	respondWithJSON(w, statusCode, errorResponse{Error: message})
 }
 
 func respondWithJSON(w http.ResponseWriter, statusCode int, payload any) {
 	jsonResponse, err := json.Marshal(payload)
 	if err != nil {
-		log.Println(fmt.Errorf("encoding JSON: %w", err))
+		log.Print(fmt.Errorf("%v encoding JSON response: %w", errorTag, err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -124,14 +136,14 @@ func validateChirp(w http.ResponseWriter, r *http.Request) (string, uuid.UUID, b
 	var data jsonRequest
 	err := decoder.Decode(&data)
 	if err != nil {
-		log.Print(fmt.Errorf("[ error ] decoding JSON stream: %w", err))
-		respondWithError(w, http.StatusBadRequest, "non-conforming JSON received", err)
+		log.Print(fmt.Errorf("%v decoding non-conforming JSON request: %w", errorTag, err))
+		respondWithError(w, http.StatusBadRequest, "non-conforming JSON received")
 		return "", uuid.Nil, false
 	}
 
 	const maxChirpLength = 140
 	if chirpLength := len([]rune(data.Body)); chirpLength > maxChirpLength {
-		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Chirp is %d characters long", chirpLength), fmt.Errorf("remove, at least, %d characters to make it %d", chirpLength-maxChirpLength, maxChirpLength))
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Chirp is %d characters longer than allowed", chirpLength-maxChirpLength))
 		return "", uuid.Nil, false
 	}
 
@@ -142,7 +154,6 @@ func validateChirp(w http.ResponseWriter, r *http.Request) (string, uuid.UUID, b
 	}
 	cleanedChirp := censorChirp(data.Body, badWords)
 
-	// respondWithJSON(w, http.StatusOK, validResponse{CleanedBody: cleanedChirp})
 	return cleanedChirp, data.UserId, true
 }
 
@@ -172,25 +183,20 @@ func (cfg *apiConfig) handlerUser(w http.ResponseWriter, r *http.Request) {
 	var data jsonRequest
 	err := decoder.Decode(&data)
 	if err != nil {
-		log.Print(fmt.Errorf("[ error ] decoding JSON stream: %w", err))
-		respondWithError(w, http.StatusBadRequest, "non-conforming JSON received", err)
+		log.Print(fmt.Errorf("%v decoding non-conforming JSON request: %w", errorTag, err))
+		respondWithError(w, http.StatusBadRequest, "non-conforming JSON received")
 		return
 	}
 
 	user, err := cfg.db.CreateUser(r.Context(), data.Email)
 	if err != nil {
-		log.Print(fmt.Errorf("[ error ] creating new DB user for %q: %w", data.Email, err))
-		respondWithError(w, http.StatusInternalServerError, "database error: couldn't create user", err)
+		log.Print(fmt.Errorf("%v creating new database user for %q: %w", errorTag, data.Email, err))
+		respondWithError(w, http.StatusInternalServerError, "database error: couldn't create user")
 		return
 	}
 
-	log.Printf("[  ok   ] user %q created", user.Email)
-	respondWithJSON(w, http.StatusCreated, User{
-		Id:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
-	})
+	log.Printf("%v user %q created", successTag, user.Email)
+	respondWithJSON(w, http.StatusCreated, addTagsToUser(user))
 }
 
 func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
@@ -198,26 +204,26 @@ func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
 	chirp, err := cfg.db.SaveChirp(r.Context(), database.SaveChirpParams{Body: body, UserID: user_id})
 	if err != nil {
-		log.Print(fmt.Errorf("[ error ] storing chirp in DB: %w", err))
-		respondWithError(w, http.StatusInternalServerError, "database error: couldn't store chirp", err)
+		log.Print(fmt.Errorf("%v storing chirp in the database: %w", errorTag, err))
+		respondWithError(w, http.StatusInternalServerError, "database error: couldn't store chirp")
 		return
 	}
 
-	log.Print("[  ok   ] chirp stored")
+	log.Printf("%v chirp stored in the database", successTag)
 	respondWithJSON(w, http.StatusCreated, addTagsToChirp(chirp))
 }
 
 func (cfg *apiConfig) handlerGETChirps(w http.ResponseWriter, r *http.Request) {
 	chirps, err := cfg.db.GetChirps(r.Context())
 	if err != nil {
-		log.Print(fmt.Errorf("[ error ] getting chirps from DB: %w", err))
-		respondWithError(w, http.StatusInternalServerError, "database error: couldn't retrieve chirps", err)
+		log.Print(fmt.Errorf("%v getting chirps from the database: %w", errorTag, err))
+		respondWithError(w, http.StatusInternalServerError, "database error: couldn't retrieve chirps")
 		return
 	}
 
-	log.Print("[  ok   ] chirps served")
 	chirpsWithTags := make([]Chirp, len(chirps))
 	for i, chirp := range chirps {
 		chirpsWithTags[i] = addTagsToChirp(chirp)
@@ -228,38 +234,35 @@ func (cfg *apiConfig) handlerGETChirps(w http.ResponseWriter, r *http.Request) {
 func (cfg *apiConfig) handlerGETChirpByID(w http.ResponseWriter, r *http.Request) {
 	match := r.PathValue("chirpID")
 	if match == "" {
-		log.Print("[ warning ] missing chirp ID in GET request")
-		respondWithError(w, http.StatusBadRequest, "request error: missing chirp ID", nil)
+		respondWithError(w, http.StatusBadRequest, "request error: missing chirp ID")
 		return
 	}
 
 	chirp_id, err := uuid.Parse(match)
 	if err != nil {
-		log.Print("[ warning ] not a valid chirp UUID in GET request")
-		respondWithError(w, http.StatusBadRequest, "request error: not a valid chirp UUID", err)
+		respondWithError(w, http.StatusBadRequest, "request error: not a valid chirp UUID")
 		return
 	}
 
 	chirp, err := cfg.db.GetChirpByID(r.Context(), chirp_id)
 	if err != nil {
-		log.Print(fmt.Errorf("[ warning ] chirp id=%q not found: %w", chirp_id, err))
-		respondWithError(w, http.StatusNotFound, "chirp doesn't exist", err)
+		log.Print(fmt.Errorf("%v chirp id=%q not found: %w", warningTag, chirp_id, err))
+		respondWithError(w, http.StatusNotFound, "chirp doesn't exist")
 		return
 	}
 
-	log.Print("[   ok    ] chirp served")
 	respondWithJSON(w, http.StatusOK, addTagsToChirp(chirp))
 }
 
 func main() {
 	if err := godotenv.Load(); err != nil {
-		log.Fatal(fmt.Errorf("[ error ] loading .env file: %w", err))
+		log.Fatal(fmt.Errorf("%v loading .env file: %w", errorTag, err))
 	}
 
 	dbURL := os.Getenv("DB_URL")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
-		log.Fatal(fmt.Errorf("[ error ] preparing database abstraction: %w", err))
+		log.Fatal(fmt.Errorf("%v preparing database abstraction: %w", errorTag, err))
 	}
 	defer db.Close()
 	dbQueries := database.New(db)
@@ -299,7 +302,7 @@ func main() {
 	log.Printf("server is listening for requests on port %v\n", port)
 	if err := server.ListenAndServe(); err != nil {
 		if err != http.ErrServerClosed {
-			log.Fatal(fmt.Errorf("[ error ] server failed: %w", err))
+			log.Fatal(fmt.Errorf("%v server failed: %w", errorTag, err))
 		} else {
 			log.Println("server exited gracefully")
 		}
