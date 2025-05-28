@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/neira-daniel/go-chirpy/internal/auth"
 	"github.com/neira-daniel/go-chirpy/internal/database"
 )
 
@@ -176,7 +177,8 @@ func censorChirp(message string, badWords map[string]struct{}) string {
 
 func (cfg *apiConfig) handlerUser(w http.ResponseWriter, r *http.Request) {
 	type jsonRequest struct {
-		Email string `json:"email"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -188,7 +190,17 @@ func (cfg *apiConfig) handlerUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := cfg.db.CreateUser(r.Context(), data.Email)
+	hashedPassword, err := auth.HashPassword(data.Password)
+	if err != nil {
+		log.Print(fmt.Errorf("%v couldn't hash password for user %q: %w", errorTag, data.Email, err))
+		respondWithError(w, http.StatusInternalServerError, "server error: couldn't hash password")
+		return
+	}
+
+	user, err := cfg.db.CreateUser(r.Context(), database.CreateUserParams{
+		Email:          data.Email,
+		HashedPassword: hashedPassword,
+	})
 	if err != nil {
 		log.Print(fmt.Errorf("%v creating new database user for %q: %w", errorTag, data.Email, err))
 		respondWithError(w, http.StatusInternalServerError, "database error: couldn't create user")
@@ -254,6 +266,38 @@ func (cfg *apiConfig) handlerGETChirpByID(w http.ResponseWriter, r *http.Request
 	respondWithJSON(w, http.StatusOK, addTagsToChirp(chirp))
 }
 
+func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
+	type jsonRequest struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	var data jsonRequest
+	err := decoder.Decode(&data)
+	if err != nil {
+		log.Print(fmt.Errorf("%v decoding non-conforming JSON request: %w", errorTag, err))
+		respondWithError(w, http.StatusBadRequest, "non-conforming JSON received")
+		return
+	}
+
+	user, err := cfg.db.GetUserByEmail(r.Context(), data.Email)
+	if err != nil {
+		log.Print(fmt.Errorf("%v getting user from the database: %w", errorTag, err))
+		respondWithError(w, http.StatusInternalServerError, "database error: couldn't retrieve user")
+		return
+	}
+
+	if err := auth.CheckPasswordHash(user.HashedPassword, data.Password); err != nil {
+		log.Printf("%v wrong password for %q", warningTag, data.Email)
+		respondWithError(w, http.StatusUnauthorized, "wrong password")
+		return
+	}
+
+	log.Printf("%v user %q has logged-in", successTag, data.Email)
+	respondWithJSON(w, http.StatusOK, addTagsToUser(user))
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal(fmt.Errorf("%v loading .env file: %w", errorTag, err))
@@ -294,6 +338,7 @@ func main() {
 	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGETChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGETChirpByID)
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerChirps)
+	mux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
 	mux.HandleFunc("POST /api/users", apiCfg.handlerUser)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
