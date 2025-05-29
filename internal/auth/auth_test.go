@@ -1,59 +1,80 @@
 package auth
 
 import (
+	"fmt"
 	"log"
 	"testing"
 )
 
-func TestPasswords(t *testing.T) {
-	passwords := []string{"password", "wearechecking", "thisFANTASTICpassword"}
-	for _, password := range passwords {
-		hashedPassword, err := HashPassword(password)
-		if err != nil {
-			log.Fatalf("can't hash password %q", password)
-		}
-		if err := CheckPasswordHash(hashedPassword, password); err != nil {
-			t.Errorf("hashes don't match for password %q", password)
-			return
-		}
-	}
-}
-
-func TestCompareHashesDifferentPasswords(t *testing.T) {
-	password1 := "wearechecking"
+func TestPasswordManagement(t *testing.T) {
+	password1 := "we are checking"
 	hashedPassword1, err := HashPassword(password1)
 	if err != nil {
 		log.Fatalf("can't hash password %q", password1)
 	}
 
-	password2 := "wearenotchecking"
+	password2 := "we are checking"
 	hashedPassword2, err := HashPassword(password2)
 	if err != nil {
-		log.Fatalf("can't hash password %q", password1)
+		log.Fatalf("can't hash password %q", password2)
 	}
 
-	if err := CheckPasswordHash(hashedPassword1, password2); err == nil {
-		t.Errorf("hash for %q matches the hash for %q", password1, password2)
-		return
+	password3 := "thisFANTASTICpassword"
+	hashedPassword3, err := HashPassword(password3)
+	if err != nil {
+		log.Fatalf("can't hash password %q", password3)
 	}
-	if err := CheckPasswordHash(hashedPassword2, password1); err == nil {
-		t.Errorf("hash for %q matches the hash for %q", password2, password1)
-		return
-	}
-}
 
-func TestSalt(t *testing.T) {
-	password := "wearechecking"
-	hash1, err := HashPassword(password)
-	if err != nil {
-		log.Fatalf("can't hash password %q", password)
+	tests := []struct {
+		name           string
+		password       string
+		hashedPassword string
+		result         bool
+	}{
+		{
+			name:           "Assert valid password: 1",
+			password:       password1,
+			hashedPassword: hashedPassword1,
+			result:         true,
+		},
+		{
+			name:           "Assert valid password: 2",
+			password:       password1,
+			hashedPassword: hashedPassword2,
+			result:         true,
+		},
+		{
+			name:           "Assert invalid password",
+			password:       password2,
+			hashedPassword: hashedPassword3,
+			result:         false,
+		},
+		{
+			name:           "Assert invalid hash",
+			password:       password3,
+			hashedPassword: "not a valid hash",
+			result:         false,
+		},
+		{
+			name:           "Assert empty password",
+			password:       "",
+			hashedPassword: hashedPassword3,
+			result:         false,
+		},
+		{
+			name:           "Assert empty password and hash",
+			password:       "",
+			hashedPassword: "",
+			result:         false,
+		},
 	}
-	hash2, err := HashPassword(password)
-	if err != nil {
-		log.Fatalf("can't hash password %q", password)
-	}
-	if hash1 == hash2 {
-		t.Errorf("salt not working for password %q", password)
-		return
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fmt.Printf("pw=%q, hash=%q\n", test.password, test.hashedPassword)
+			if err := CheckPasswordHash(test.hashedPassword, test.password); (err == nil) != test.result {
+				t.Error(fmt.Errorf("expected: %v; error: %w", test.result, err))
+			}
+		})
 	}
 }
