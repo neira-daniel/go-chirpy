@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"log"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestPasswordManagement(t *testing.T) {
@@ -71,9 +74,76 @@ func TestPasswordManagement(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			fmt.Printf("pw=%q, hash=%q\n", test.password, test.hashedPassword)
 			if err := CheckPasswordHash(test.hashedPassword, test.password); (err == nil) != test.result {
 				t.Error(fmt.Errorf("expected: %v; error: %w", test.result, err))
+			}
+		})
+	}
+}
+
+func TestJWTManagement(t *testing.T) {
+	user := uuid.New()
+	tokenSecret := "this token is secret"
+	badTokenSecret := "this token is super mega secret and wrong"
+	validDuration := 8 * time.Hour
+	invalidDuration := -validDuration
+
+	tests := []struct {
+		name                   string
+		userID                 uuid.UUID
+		tokenSecret            string
+		alternativeTokenSecret string
+		expiresIn              time.Duration
+		createTokenError       bool
+		validateTokenError     bool
+		userValidationError    bool
+	}{
+		{
+			name:                   "Assert correct creation and validation of JWT",
+			userID:                 user,
+			tokenSecret:            tokenSecret,
+			alternativeTokenSecret: tokenSecret,
+			expiresIn:              validDuration,
+			createTokenError:       false,
+			validateTokenError:     false,
+			userValidationError:    false,
+		},
+		{
+			name:                   "Assert bad token secret to validate JWT",
+			userID:                 user,
+			tokenSecret:            tokenSecret,
+			alternativeTokenSecret: badTokenSecret,
+			expiresIn:              validDuration,
+			createTokenError:       false,
+			validateTokenError:     true,
+			userValidationError:    true,
+		},
+		{
+			name:                   "Assert invalid expiration",
+			userID:                 user,
+			tokenSecret:            tokenSecret,
+			alternativeTokenSecret: tokenSecret,
+			expiresIn:              invalidDuration,
+			createTokenError:       false,
+			validateTokenError:     true,
+			userValidationError:    true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tokenString, err := MakeJWT(test.userID, test.tokenSecret, test.expiresIn)
+			if (err != nil) != test.createTokenError {
+				t.Errorf("%v: can't create JWT: %v", test.name, err)
+			}
+
+			recoveredUserID, err := ValidateJWT(tokenString, test.alternativeTokenSecret)
+			if (err != nil) != test.validateTokenError {
+				t.Errorf("%v: can't parse JWT: %v", test.name, err)
+			}
+
+			if (test.userID != recoveredUserID) != test.userValidationError {
+				t.Errorf("expected test.userID == recoveredUserID to be %v, but it isn't", test.userValidationError)
 			}
 		})
 	}
