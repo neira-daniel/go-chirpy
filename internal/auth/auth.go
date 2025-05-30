@@ -49,9 +49,14 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		return uuid.Nil, errors.New("unknown claims type, can't proceed")
 	}
 
-	userID, err := uuid.Parse(claims.Subject)
+	userIDString, err := claims.GetSubject()
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("getting user ID from JWT: %w", err)
+		return uuid.Nil, fmt.Errorf("getting subject field from JWT: %w", err)
+	}
+
+	userID, err := uuid.Parse(userIDString)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("transforming user id of type string into uuid type: %w", err)
 	}
 
 	return userID, nil
