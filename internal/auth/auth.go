@@ -41,17 +41,17 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		return []byte(tokenSecret), nil
 	})
 	if err != nil {
-		return uuid.UUID{}, fmt.Errorf("parsing JWT: %w", err)
+		return uuid.Nil, fmt.Errorf("parsing JWT: %w", err)
 	}
 
 	claims, ok := token.Claims.(*jwt.RegisteredClaims)
 	if !ok {
-		return uuid.UUID{}, errors.New("unknown claims type, can't proceed")
+		return uuid.Nil, errors.New("unknown claims type, can't proceed")
 	}
 
 	userID, err := uuid.Parse(claims.Subject)
 	if err != nil {
-		return uuid.UUID{}, fmt.Errorf("getting user ID from JWT: %w", err)
+		return uuid.Nil, fmt.Errorf("getting user ID from JWT: %w", err)
 	}
 
 	return userID, nil
