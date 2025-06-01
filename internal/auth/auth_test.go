@@ -3,6 +3,7 @@ package auth
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"testing"
 	"time"
 
@@ -109,6 +110,16 @@ func TestJWTManagement(t *testing.T) {
 			userValidationError:    false,
 		},
 		{
+			name:                   "Assert empty tokenSecret",
+			userID:                 user,
+			tokenSecret:            "",
+			alternativeTokenSecret: "",
+			expiresIn:              validDuration,
+			createTokenError:       true,
+			validateTokenError:     true,
+			userValidationError:    true,
+		},
+		{
 			name:                   "Assert bad token secret to validate JWT",
 			userID:                 user,
 			tokenSecret:            tokenSecret,
@@ -134,16 +145,84 @@ func TestJWTManagement(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			tokenString, err := MakeJWT(test.userID, test.tokenSecret, test.expiresIn)
 			if (err != nil) != test.createTokenError {
-				t.Errorf("%v: can't create JWT: %v", test.name, err)
+				t.Errorf("can't create JWT: %v", err)
 			}
 
 			recoveredUserID, err := ValidateJWT(tokenString, test.alternativeTokenSecret)
 			if (err != nil) != test.validateTokenError {
-				t.Errorf("%v: can't parse JWT: %v", test.name, err)
+				t.Errorf("can't parse JWT: %v", err)
 			}
 
 			if (test.userID != recoveredUserID) != test.userValidationError {
 				t.Errorf("expected test.userID == recoveredUserID to be %v, but it isn't", test.userValidationError)
+			}
+		})
+	}
+}
+
+func TestBearerToken(t *testing.T) {
+	tokenString := "+pK7C2P"
+
+	validAuthHeader1 := fmt.Sprintf("Bearer %v", tokenString)
+	validHeader1 := http.Header{
+		"Authorization": []string{validAuthHeader1},
+	}
+
+	validAuthHeader2 := fmt.Sprintf("    Bearer %v\t", tokenString)
+	validHeader2 := http.Header{
+		"Authorization": []string{validAuthHeader2},
+	}
+
+	invalidAuthHeader := fmt.Sprintf("Bearer: %v", tokenString)
+	invalidHeader := http.Header{
+		"Authorization": []string{invalidAuthHeader},
+	}
+
+	tests := []struct {
+		name             string
+		tokenString      string
+		header           http.Header
+		parseHeaderError bool
+		incorrectToken   bool
+	}{
+		{
+			name:             "valid token string 1",
+			tokenString:      tokenString,
+			header:           validHeader1,
+			parseHeaderError: false,
+			incorrectToken:   false,
+		},
+		{
+			name:             "valid token string 2",
+			tokenString:      tokenString,
+			header:           validHeader2,
+			parseHeaderError: false,
+			incorrectToken:   false,
+		},
+		{
+			name:             "invalid header",
+			tokenString:      tokenString,
+			header:           invalidHeader,
+			parseHeaderError: true,
+			incorrectToken:   true,
+		},
+		{
+			name:             "invalid token string",
+			tokenString:      "bad token string",
+			header:           validHeader1,
+			parseHeaderError: false,
+			incorrectToken:   true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			bearerToken, err := GetBearerToken(test.header)
+			if (err != nil) != test.parseHeaderError {
+				t.Error("found unexpected mismatch when parsing header")
+			}
+			if (bearerToken != test.tokenString) != test.incorrectToken {
+				t.Errorf("got %q when expecting %q", bearerToken, test.tokenString)
 			}
 		})
 	}

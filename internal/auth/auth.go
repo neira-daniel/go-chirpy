@@ -3,6 +3,8 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -25,6 +27,10 @@ func CheckPasswordHash(hash, password string) error {
 }
 
 func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
+	if tokenSecret == "" {
+		return "", errors.New("got empty tokenSecret")
+	}
+
 	now := time.Now().UTC()
 	claims := &jwt.RegisteredClaims{
 		Issuer:    "chirpy",
@@ -60,4 +66,18 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	}
 
 	return userID, nil
+}
+
+func GetBearerToken(headers http.Header) (string, error) {
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return "", errors.New("Authorization header not found")
+	}
+
+	fields := strings.Fields(authHeader)
+	if len(fields) < 2 || strings.ToLower(fields[0]) != "bearer" {
+		return "", errors.New("Received malformed authorization header")
+	}
+
+	return fields[1], nil
 }
