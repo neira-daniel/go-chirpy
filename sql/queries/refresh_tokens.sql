@@ -7,3 +7,8 @@ VALUES (
     $2,
     now() AT TIME ZONE 'UTC' + sqlc.arg(days)::integer * INTERVAL '1 day'
 );
+
+-- name: GetRefreshToken :one
+SELECT *
+FROM refresh_tokens
+WHERE token = $1;
