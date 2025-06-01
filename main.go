@@ -26,20 +26,22 @@ const (
 )
 
 type User struct {
-	Id        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
-	Token     string    `json:"token,omitempty"`
+	Id           uuid.UUID `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Email        string    `json:"email"`
+	Token        string    `json:"token,omitempty"`
+	RefreshToken string    `json:"refresh_token,omitempty"`
 }
 
-func addTagsToUser(user database.User, token string) User {
+func addTagsToUser(user database.User, token string, refreshToken string) User {
 	return User{
-		Id:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
-		Token:     token,
+		Id:           user.ID,
+		CreatedAt:    user.CreatedAt,
+		UpdatedAt:    user.UpdatedAt,
+		Email:        user.Email,
+		Token:        token,
+		RefreshToken: refreshToken,
 	}
 }
 
@@ -186,7 +188,7 @@ func (cfg *apiConfig) handlerUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("%v user %q created", successTag, user.Email)
-	respondWithJSON(w, http.StatusCreated, addTagsToUser(user, ""))
+	respondWithJSON(w, http.StatusCreated, addTagsToUser(user, "", ""))
 }
 
 func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
@@ -278,14 +280,13 @@ func (cfg *apiConfig) handlerGETChirpByID(w http.ResponseWriter, r *http.Request
 }
 
 func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
-	type jsonRequest struct {
-		Password          string `json:"password"`
-		Email             string `json:"email"`
-		DurationInSeconds *int   `json:"expires_in_seconds"` // we use a pointer to handle this field as optional
+	type payload struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
-	var data jsonRequest
+	var data payload
 	err := decoder.Decode(&data)
 	if err != nil {
 		log.Print(fmt.Errorf("%v decoding non-conforming JSON request: %w", errorTag, err))
@@ -306,20 +307,27 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	duration := 3600 * time.Second // we default to an hour
-	if data.DurationInSeconds != nil && *data.DurationInSeconds > 0 {
-		duration = min(duration, time.Duration(*data.DurationInSeconds)*time.Second)
-	}
-
-	jwt, err := auth.MakeJWT(user.ID, cfg.signingSecret, duration)
+	JWTDuration := 1 * time.Hour
+	jwt, err := auth.MakeJWT(user.ID, cfg.signingSecret, JWTDuration)
 	if err != nil {
 		log.Print(fmt.Errorf("%v couldn't sign token: %w", errorTag, err))
 		respondWithError(w, http.StatusInternalServerError, "couldn't create authentication string")
 		return
 	}
+	refreshToken, _ := auth.MakeRefreshToken()
+	var refreshTokenDuration int32 = 60
+	if err := cfg.db.StoreRefreshToken(r.Context(), database.StoreRefreshTokenParams{
+		Token:  refreshToken,
+		UserID: user.ID,
+		Days:   refreshTokenDuration,
+	}); err != nil {
+		log.Print(fmt.Errorf("%v couldn't store refreshToken: %w", errorTag, err))
+		respondWithError(w, http.StatusInternalServerError, "database error: couldn't store refresh token")
+		return
+	}
 
 	log.Printf("%v user %q has logged-in", successTag, data.Email)
-	respondWithJSON(w, http.StatusOK, addTagsToUser(user, jwt))
+	respondWithJSON(w, http.StatusOK, addTagsToUser(user, jwt, refreshToken))
 }
 
 func main() {
