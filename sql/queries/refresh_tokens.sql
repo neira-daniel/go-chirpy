@@ -12,3 +12,9 @@ VALUES (
 SELECT *
 FROM refresh_tokens
 WHERE token = $1;
+
+-- name: RevokeAccess :execresult
+UPDATE refresh_tokens
+SET updated_at = now() AT TIME ZONE 'UTC',
+    revoked_at = now() AT TIME ZONE 'UTC'
+WHERE token = $1;

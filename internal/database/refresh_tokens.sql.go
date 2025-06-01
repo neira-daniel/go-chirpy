@@ -7,6 +7,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 )
@@ -29,6 +30,17 @@ func (q *Queries) GetRefreshToken(ctx context.Context, token string) (RefreshTok
 		&i.RevokedAt,
 	)
 	return i, err
+}
+
+const revokeAccess = `-- name: RevokeAccess :execresult
+UPDATE refresh_tokens
+SET updated_at = now() AT TIME ZONE 'UTC',
+    revoked_at = now() AT TIME ZONE 'UTC'
+WHERE token = $1
+`
+
+func (q *Queries) RevokeAccess(ctx context.Context, token string) (sql.Result, error) {
+	return q.db.ExecContext(ctx, revokeAccess, token)
 }
 
 const storeRefreshToken = `-- name: StoreRefreshToken :exec
