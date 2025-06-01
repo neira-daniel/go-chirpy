@@ -360,6 +360,38 @@ func (cfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, payload{Token: jwt})
 }
 
+func (cfg *apiConfig) handlerRevokeAccess(w http.ResponseWriter, r *http.Request) {
+	refreshTokenReceived, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Print(fmt.Errorf("%v getting bearer token: %w", warningTag, err))
+		respondWithError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	result, err := cfg.db.RevokeAccess(r.Context(), refreshTokenReceived)
+	if err != nil {
+		log.Print(fmt.Errorf("%v couldn't revoke refresh token access: %w", errorTag, err))
+		respondWithError(w, http.StatusInternalServerError, "database error: couldn't revoke refresh token")
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Print(fmt.Errorf("%v couldn't inspect rows affected after revoking token: %w", errorTag, err))
+		respondWithError(w, http.StatusInternalServerError, "database error: couldn't verify that refresh token was revoked")
+		return
+	}
+
+	if rowsAffected == 0 {
+		log.Print(fmt.Errorf("%v invalid refresh token; couldn't revoke: %w", errorTag, err))
+		respondWithError(w, http.StatusInternalServerError, "invalid bearer token")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal(fmt.Errorf("%v loading .env file: %w", errorTag, err))
@@ -409,8 +441,9 @@ func main() {
 	mux.HandleFunc("GET  /api/chirps/{chirpID}", apiCfg.handlerGETChirpByID)
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerChirps)
 	mux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
-	mux.HandleFunc("POST /api/users", apiCfg.handlerUser)
 	mux.HandleFunc("POST /api/refresh", apiCfg.handlerRefresh)
+	mux.HandleFunc("POST /api/revoke", apiCfg.handlerRevokeAccess)
+	mux.HandleFunc("POST /api/users", apiCfg.handlerUser)
 	mux.HandleFunc("GET  /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 
