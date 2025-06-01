@@ -30,14 +30,16 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+	Token     string    `json:"token,omitempty"`
 }
 
-func addTagsToUser(user database.User) User {
+func addTagsToUser(user database.User, token string) User {
 	return User{
 		Id:        user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
+		Token:     token,
 	}
 }
 
@@ -62,6 +64,7 @@ func addTagsToChirp(chirp database.Chirp) Chirp {
 type apiConfig struct {
 	db             *database.Queries
 	platform       string
+	signingSecret  string
 	fileserverHits atomic.Int32 // safe across goroutines
 }
 
@@ -125,37 +128,12 @@ func respondWithJSON(w http.ResponseWriter, statusCode int, payload any) {
 	w.Write(jsonResponse)
 }
 
-func validateChirp(w http.ResponseWriter, r *http.Request) (string, uuid.UUID, bool) {
-	type jsonRequest struct {
-		Body   string    `json:"body"`
-		UserId uuid.UUID `json:"user_id"`
-	}
-
-	// we use JSON Decode instead of Unmarshal because we're dealing with a stream
-	// of data instead of a []byte in memory
-	decoder := json.NewDecoder(r.Body)
-	var data jsonRequest
-	err := decoder.Decode(&data)
-	if err != nil {
-		log.Print(fmt.Errorf("%v decoding non-conforming JSON request: %w", errorTag, err))
-		respondWithError(w, http.StatusBadRequest, "non-conforming JSON received")
-		return "", uuid.Nil, false
-	}
-
+func validateChirp(chirp string) error {
 	const maxChirpLength = 140
-	if chirpLength := len([]rune(data.Body)); chirpLength > maxChirpLength {
-		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Chirp is %d characters longer than allowed", chirpLength-maxChirpLength))
-		return "", uuid.Nil, false
+	if chirpLength := len([]rune(chirp)); chirpLength > maxChirpLength {
+		return fmt.Errorf("Chirp is %d characters longer than allowed", chirpLength-maxChirpLength)
 	}
-
-	badWords := map[string]struct{}{
-		"kerfuffle": {},
-		"sharbert":  {},
-		"fornax":    {},
-	}
-	cleanedChirp := censorChirp(data.Body, badWords)
-
-	return cleanedChirp, data.UserId, true
+	return nil
 }
 
 func censorChirp(message string, badWords map[string]struct{}) string {
@@ -208,16 +186,49 @@ func (cfg *apiConfig) handlerUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("%v user %q created", successTag, user.Email)
-	respondWithJSON(w, http.StatusCreated, addTagsToUser(user))
+	respondWithJSON(w, http.StatusCreated, addTagsToUser(user, ""))
 }
 
 func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
-	body, user_id, ok := validateChirp(w, r)
-	if !ok {
+	jwt, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Print(fmt.Errorf("%v getting bearer token: %w", warningTag, err))
+		respondWithError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	userID, err := auth.ValidateJWT(jwt, cfg.signingSecret)
+	if err != nil {
+		log.Print(fmt.Errorf("%v validating JWT: %w", warningTag, err))
+		respondWithError(w, http.StatusUnauthorized, "unauthorized action")
 		return
 	}
 
-	chirp, err := cfg.db.SaveChirp(r.Context(), database.SaveChirpParams{Body: body, UserID: user_id})
+	type jsonRequest struct {
+		Body string `json:"body"`
+	}
+	// we use JSON Decode instead of Unmarshal because we're dealing with a stream
+	// of data instead of a []byte in memory
+	decoder := json.NewDecoder(r.Body)
+	var data jsonRequest
+	if err := decoder.Decode(&data); err != nil {
+		log.Print(fmt.Errorf("%v decoding non-conforming JSON request: %w", errorTag, err))
+		respondWithError(w, http.StatusBadRequest, "non-conforming JSON received")
+	}
+
+	if err := validateChirp(data.Body); err != nil {
+		log.Printf("%v invalid chirp", warningTag)
+		respondWithError(w, http.StatusBadGateway, "invalid chirp")
+		return
+	}
+
+	badWords := map[string]struct{}{
+		"kerfuffle": {},
+		"sharbert":  {},
+		"fornax":    {},
+	}
+	censoredChirp := censorChirp(data.Body, badWords)
+
+	chirp, err := cfg.db.SaveChirp(r.Context(), database.SaveChirpParams{Body: censoredChirp, UserID: userID})
 	if err != nil {
 		log.Print(fmt.Errorf("%v storing chirp in the database: %w", errorTag, err))
 		respondWithError(w, http.StatusInternalServerError, "database error: couldn't store chirp")
@@ -268,8 +279,9 @@ func (cfg *apiConfig) handlerGETChirpByID(w http.ResponseWriter, r *http.Request
 
 func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	type jsonRequest struct {
-		Password string `json:"password"`
-		Email    string `json:"email"`
+		Password          string `json:"password"`
+		Email             string `json:"email"`
+		DurationInSeconds *int   `json:"expires_in_seconds"` // we use a pointer to handle this field as optional
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -294,8 +306,20 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	duration := 3600 * time.Second // we default to an hour
+	if data.DurationInSeconds != nil && *data.DurationInSeconds > 0 {
+		duration = min(duration, time.Duration(*data.DurationInSeconds)*time.Second)
+	}
+
+	jwt, err := auth.MakeJWT(user.ID, cfg.signingSecret, duration)
+	if err != nil {
+		log.Print(fmt.Errorf("%v couldn't sign token: %w", errorTag, err))
+		respondWithError(w, http.StatusInternalServerError, "couldn't create authentication string")
+		return
+	}
+
 	log.Printf("%v user %q has logged-in", successTag, data.Email)
-	respondWithJSON(w, http.StatusOK, addTagsToUser(user))
+	respondWithJSON(w, http.StatusOK, addTagsToUser(user, jwt))
 }
 
 func main() {
@@ -303,7 +327,10 @@ func main() {
 		log.Fatal(fmt.Errorf("%v loading .env file: %w", errorTag, err))
 	}
 
-	dbURL := os.Getenv("DB_URL")
+	dbURL, ok := os.LookupEnv("DB_URL")
+	if !ok || dbURL == "" {
+		log.Fatal("connection string to the database was not found")
+	}
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatal(fmt.Errorf("%v preparing database abstraction: %w", errorTag, err))
@@ -322,9 +349,14 @@ func main() {
 	}
 
 	// declare and initialize server configuration
+	tokenSecret, ok := os.LookupEnv("JWTSECRET")
+	if !ok || tokenSecret == "" {
+		log.Fatal("suitable token secret to validate JWT not found")
+	}
 	apiCfg := apiConfig{
 		db:             dbQueries,
 		platform:       os.Getenv("PLATFORM"),
+		signingSecret:  tokenSecret,
 		fileserverHits: atomic.Int32{},
 	}
 
