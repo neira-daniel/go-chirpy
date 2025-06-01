@@ -330,6 +330,36 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, addTagsToUser(user, jwt, refreshToken))
 }
 
+func (cfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
+	refreshTokenReceived, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Print(fmt.Errorf("%v getting bearer token: %w", warningTag, err))
+		respondWithError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	refreshTokenDB, err := cfg.db.GetRefreshToken(r.Context(), refreshTokenReceived)
+	if err != nil || refreshTokenDB.RevokedAt.Valid || time.Now().UTC().After(refreshTokenDB.ExpiresAt) {
+		log.Printf("%v got invalid refresh token", warningTag)
+		respondWithError(w, http.StatusUnauthorized, "invalid refresh token")
+		return
+	}
+
+	JWTDuration := 1 * time.Hour
+	jwt, err := auth.MakeJWT(refreshTokenDB.UserID, cfg.signingSecret, JWTDuration)
+	if err != nil {
+		log.Print(fmt.Errorf("%v couldn't sign token: %w", errorTag, err))
+		respondWithError(w, http.StatusInternalServerError, "couldn't create authentication string")
+		return
+	}
+
+	type payload struct {
+		Token string `json:"token"`
+	}
+	log.Printf("%v JWT renewed", successTag)
+	respondWithJSON(w, http.StatusOK, payload{Token: jwt})
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal(fmt.Errorf("%v loading .env file: %w", errorTag, err))
@@ -374,13 +404,14 @@ func main() {
 
 	mux.Handle("/app/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/", app)))
 	mux.Handle("/app/assets/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/assets/", assets)))
-	mux.HandleFunc("GET /api/healthz", handlerHealth)
-	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGETChirps)
-	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGETChirpByID)
+	mux.HandleFunc("GET  /api/healthz", handlerHealth)
+	mux.HandleFunc("GET  /api/chirps", apiCfg.handlerGETChirps)
+	mux.HandleFunc("GET  /api/chirps/{chirpID}", apiCfg.handlerGETChirpByID)
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerChirps)
 	mux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
 	mux.HandleFunc("POST /api/users", apiCfg.handlerUser)
-	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
+	mux.HandleFunc("POST /api/refresh", apiCfg.handlerRefresh)
+	mux.HandleFunc("GET  /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 
 	// start the server
