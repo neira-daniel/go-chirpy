@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -80,4 +82,14 @@ func GetBearerToken(headers http.Header) (string, error) {
 	}
 
 	return fields[1], nil
+}
+
+func MakeRefreshToken() (string, error) {
+	key := make([]byte, 32)
+	// we don't check the values returned by Read
+	// if it doesn't work, it will panic the program anyway before returning any of
+	// the values
+	// also: it's bad practice to try to recover from a crypto panic
+	rand.Read(key)
+	return hex.EncodeToString(key), nil
 }
