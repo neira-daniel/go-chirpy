@@ -32,6 +32,7 @@ type User struct {
 	Email        string    `json:"email"`
 	Token        string    `json:"token,omitempty"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
+	IsChirpyRed  bool      `json:"is_chirpy_red"`
 }
 
 func addTagsToUser(user database.User, token string, refreshToken string) User {
@@ -42,6 +43,7 @@ func addTagsToUser(user database.User, token string, refreshToken string) User {
 		Email:        user.Email,
 		Token:        token,
 		RefreshToken: refreshToken,
+		IsChirpyRed:  user.IsChirpyRed,
 	}
 }
 
@@ -486,6 +488,44 @@ func (cfg *apiConfig) handlerDELETEChirpByID(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (cfg *apiConfig) handlerUpgradeUser(w http.ResponseWriter, r *http.Request) {
+	type payload struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	var data payload
+	if err := decoder.Decode(&data); err != nil {
+		log.Print(fmt.Errorf("%v decoding non-conforming JSON request: %w", errorTag, err))
+		respondWithError(w, http.StatusBadRequest, "non-conforming JSON received")
+		return
+	}
+
+	if data.Event != "user.upgraded" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	userID, err := uuid.Parse(data.Data.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "request error: not a valid user UUID")
+		return
+	}
+
+	if _, err := cfg.db.UpgradeUser(r.Context(), userID); err != nil {
+		log.Print(fmt.Errorf("%v couldn't upgrade user %q: %w", errorTag, userID, err))
+		respondWithError(w, http.StatusNotFound, "couldn't upgrade user: user not found")
+		return
+	}
+
+	log.Printf("%v user %q upgraded", successTag, userID)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal(fmt.Errorf("%v loading .env file: %w", errorTag, err))
@@ -536,6 +576,7 @@ func main() {
 	mux.HandleFunc("GET    /api/chirps/{chirpID}", apiCfg.handlerGETChirpByID)
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handlerDELETEChirpByID)
 	mux.HandleFunc("POST   /api/login", apiCfg.handlerLogin)
+	mux.HandleFunc("POST   /api/polka/webhooks", apiCfg.handlerUpgradeUser)
 	mux.HandleFunc("POST   /api/refresh", apiCfg.handlerRefresh)
 	mux.HandleFunc("POST   /api/revoke", apiCfg.handlerRevokeAccess)
 	mux.HandleFunc("POST   /api/users", apiCfg.handlerUser)
