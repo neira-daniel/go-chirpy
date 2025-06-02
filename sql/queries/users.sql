@@ -13,6 +13,13 @@ RETURNING *;
 SELECT * FROM users
 WHERE email = $1;
 
-
 -- name: ResetDatabase :exec
 DELETE FROM users;
+
+-- name: UpdateCredentials :one
+UPDATE users
+SET updated_at = now() AT TIME ZONE 'UTC',
+    email = $1,
+    hashed_password = $2
+WHERE id = $3
+RETURNING *;
