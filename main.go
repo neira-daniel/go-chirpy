@@ -69,6 +69,7 @@ type apiConfig struct {
 	db             *database.Queries
 	platform       string
 	signingSecret  string
+	polkaKey       string
 	fileserverHits atomic.Int32 // safe across goroutines
 }
 
@@ -489,6 +490,13 @@ func (cfg *apiConfig) handlerDELETEChirpByID(w http.ResponseWriter, r *http.Requ
 }
 
 func (cfg *apiConfig) handlerUpgradeUser(w http.ResponseWriter, r *http.Request) {
+	polkaKey, err := auth.GetAPIKey(r.Header)
+	if err != nil || polkaKey != cfg.polkaKey {
+		log.Print(fmt.Errorf("%v getting api key: %w", warningTag, err))
+		respondWithError(w, http.StatusUnauthorized, "invalid request")
+		return
+	}
+
 	type payload struct {
 		Event string `json:"event"`
 		Data  struct {
@@ -557,10 +565,15 @@ func main() {
 	if !ok || tokenSecret == "" {
 		log.Fatal("suitable token secret to validate JWT not found")
 	}
+	polkaKey, ok := os.LookupEnv("POLKA_KEY")
+	if !ok || polkaKey == "" {
+		log.Fatal("suitable Polka key not found")
+	}
 	apiCfg := apiConfig{
 		db:             dbQueries,
 		platform:       os.Getenv("PLATFORM"),
 		signingSecret:  tokenSecret,
+		polkaKey:       polkaKey,
 		fileserverHits: atomic.Int32{},
 	}
 
