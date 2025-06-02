@@ -392,6 +392,49 @@ func (cfg *apiConfig) handlerRevokeAccess(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (cfg *apiConfig) handlerUpdateCredentials(w http.ResponseWriter, r *http.Request) {
+	jwt, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Print(fmt.Errorf("%v getting bearer token: %w", warningTag, err))
+		respondWithError(w, http.StatusUnauthorized, "invalid request")
+		return
+	}
+	userID, err := auth.ValidateJWT(jwt, cfg.signingSecret)
+	if err != nil {
+		log.Print(fmt.Errorf("%v validating JWT: %w", warningTag, err))
+		respondWithError(w, http.StatusUnauthorized, "unauthorized action")
+		return
+	}
+
+	type payload struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	var data payload
+	if err := decoder.Decode(&data); err != nil {
+		log.Print(fmt.Errorf("%v decoding non-conforming JSON request: %w", errorTag, err))
+		respondWithError(w, http.StatusBadRequest, "non-conforming JSON received")
+		return
+	}
+
+	hashedPassword, err := auth.HashPassword(data.Password)
+	if err != nil {
+		log.Print(fmt.Errorf("%v couldn't hash password: %w", errorTag, err))
+		respondWithError(w, http.StatusInternalServerError, "server error: couldn't hash password")
+		return
+	}
+
+	user, err := cfg.db.UpdateCredentials(r.Context(), database.UpdateCredentialsParams{
+		Email:          data.Email,
+		HashedPassword: hashedPassword,
+		ID:             userID,
+	})
+
+	log.Printf("%v user %q created", successTag, user.Email)
+	respondWithJSON(w, http.StatusOK, addTagsToUser(user, "", ""))
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal(fmt.Errorf("%v loading .env file: %w", errorTag, err))
@@ -444,6 +487,7 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", apiCfg.handlerRefresh)
 	mux.HandleFunc("POST /api/revoke", apiCfg.handlerRevokeAccess)
 	mux.HandleFunc("POST /api/users", apiCfg.handlerUser)
+	mux.HandleFunc("PUT  /api/users", apiCfg.handlerUpdateCredentials)
 	mux.HandleFunc("GET  /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 
