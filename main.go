@@ -388,6 +388,7 @@ func (cfg *apiConfig) handlerRevokeAccess(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	log.Printf("%v access revoked", successTag)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -435,6 +436,56 @@ func (cfg *apiConfig) handlerUpdateCredentials(w http.ResponseWriter, r *http.Re
 	respondWithJSON(w, http.StatusOK, addTagsToUser(user, "", ""))
 }
 
+func (cfg *apiConfig) handlerDELETEChirpByID(w http.ResponseWriter, r *http.Request) {
+	match := r.PathValue("chirpID")
+	if match == "" {
+		respondWithError(w, http.StatusBadRequest, "request error: missing chirp ID")
+		return
+	}
+
+	chirpID, err := uuid.Parse(match)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "request error: not a valid chirp UUID")
+		return
+	}
+
+	chirp, err := cfg.db.GetChirpByID(r.Context(), chirpID)
+	if err != nil {
+		log.Print(fmt.Errorf("%v chirp id=%q not found: %w", warningTag, chirpID, err))
+		respondWithError(w, http.StatusNotFound, "chirp doesn't exist")
+		return
+	}
+
+	jwt, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Print(fmt.Errorf("%v getting bearer token: %w", warningTag, err))
+		respondWithError(w, http.StatusUnauthorized, "invalid request")
+		return
+	}
+	userID, err := auth.ValidateJWT(jwt, cfg.signingSecret)
+	if err != nil {
+		log.Print(fmt.Errorf("%v validating JWT: %w", warningTag, err))
+		respondWithError(w, http.StatusUnauthorized, "unauthorized action")
+		return
+	}
+
+	if userID != chirp.UserID {
+		log.Printf("%v user tried to delete chirp from another user", warningTag)
+		respondWithError(w, http.StatusForbidden, "unauthorized action")
+		return
+	}
+
+	if err := cfg.db.DeleteChirpByID(r.Context(), chirpID); err != nil {
+		log.Print(fmt.Errorf("%v couldn't delete chirp from database: %w", errorTag, err))
+		respondWithError(w, http.StatusInternalServerError, "database error: couldn't delete chirp")
+		return
+	}
+
+	log.Printf("%v chirp %q deleted", successTag, chirpID)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal(fmt.Errorf("%v loading .env file: %w", errorTag, err))
@@ -479,17 +530,18 @@ func main() {
 
 	mux.Handle("/app/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/", app)))
 	mux.Handle("/app/assets/", apiCfg.middlewareMetricsIncrement(http.StripPrefix("/app/assets/", assets)))
-	mux.HandleFunc("GET  /api/healthz", handlerHealth)
-	mux.HandleFunc("GET  /api/chirps", apiCfg.handlerGETChirps)
-	mux.HandleFunc("GET  /api/chirps/{chirpID}", apiCfg.handlerGETChirpByID)
-	mux.HandleFunc("POST /api/chirps", apiCfg.handlerChirps)
-	mux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
-	mux.HandleFunc("POST /api/refresh", apiCfg.handlerRefresh)
-	mux.HandleFunc("POST /api/revoke", apiCfg.handlerRevokeAccess)
-	mux.HandleFunc("POST /api/users", apiCfg.handlerUser)
-	mux.HandleFunc("PUT  /api/users", apiCfg.handlerUpdateCredentials)
-	mux.HandleFunc("GET  /admin/metrics", apiCfg.handlerMetrics)
-	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
+	mux.HandleFunc("GET    /api/healthz", handlerHealth)
+	mux.HandleFunc("GET    /api/chirps", apiCfg.handlerGETChirps)
+	mux.HandleFunc("POST   /api/chirps", apiCfg.handlerChirps)
+	mux.HandleFunc("GET    /api/chirps/{chirpID}", apiCfg.handlerGETChirpByID)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handlerDELETEChirpByID)
+	mux.HandleFunc("POST   /api/login", apiCfg.handlerLogin)
+	mux.HandleFunc("POST   /api/refresh", apiCfg.handlerRefresh)
+	mux.HandleFunc("POST   /api/revoke", apiCfg.handlerRevokeAccess)
+	mux.HandleFunc("POST   /api/users", apiCfg.handlerUser)
+	mux.HandleFunc("PUT    /api/users", apiCfg.handlerUpdateCredentials)
+	mux.HandleFunc("GET    /admin/metrics", apiCfg.handlerMetrics)
+	mux.HandleFunc("POST   /admin/reset", apiCfg.handlerReset)
 
 	// start the server
 	log.Printf("server is listening for requests on port %v\n", port)
