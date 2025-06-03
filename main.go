@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -261,6 +262,10 @@ func (cfg *apiConfig) handlerGETChirps(w http.ResponseWriter, r *http.Request) {
 		log.Print(fmt.Errorf("%v getting chirps from the database: %w", errorTag, err))
 		respondWithError(w, http.StatusInternalServerError, "database error: couldn't retrieve chirps")
 		return
+	}
+
+	if match := r.URL.Query().Get("sort"); match == "desc" {
+		sort.Slice(chirps, func(i, j int) bool { return chirps[i].CreatedAt.After(chirps[j].CreatedAt) })
 	}
 
 	chirpsWithTags := make([]Chirp, len(chirps))
