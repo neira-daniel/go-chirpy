@@ -245,7 +245,18 @@ func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handlerGETChirps(w http.ResponseWriter, r *http.Request) {
-	chirps, err := cfg.db.GetChirps(r.Context())
+	var chirps []database.Chirp
+	var err error
+	if match := r.URL.Query().Get("author_id"); match == "" {
+		chirps, err = cfg.db.GetChirps(r.Context())
+	} else {
+		userID, err := uuid.Parse(match)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "request error: not a valid chirp UUID")
+			return
+		}
+		chirps, err = cfg.db.GetChirpsByAuthor(r.Context(), userID)
+	}
 	if err != nil {
 		log.Print(fmt.Errorf("%v getting chirps from the database: %w", errorTag, err))
 		respondWithError(w, http.StatusInternalServerError, "database error: couldn't retrieve chirps")
@@ -266,15 +277,15 @@ func (cfg *apiConfig) handlerGETChirpByID(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	chirp_id, err := uuid.Parse(match)
+	chirpID, err := uuid.Parse(match)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "request error: not a valid chirp UUID")
 		return
 	}
 
-	chirp, err := cfg.db.GetChirpByID(r.Context(), chirp_id)
+	chirp, err := cfg.db.GetChirpByID(r.Context(), chirpID)
 	if err != nil {
-		log.Print(fmt.Errorf("%v chirp id=%q not found: %w", warningTag, chirp_id, err))
+		log.Print(fmt.Errorf("%v chirp id=%q not found: %w", warningTag, chirpID, err))
 		respondWithError(w, http.StatusNotFound, "chirp doesn't exist")
 		return
 	}
