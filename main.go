@@ -223,7 +223,7 @@ func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 
 	if err := validateChirp(data.Body); err != nil {
 		log.Printf("%v invalid chirp", warningTag)
-		respondWithError(w, http.StatusBadGateway, "invalid chirp")
+		respondWithError(w, http.StatusBadRequest, "invalid chirp")
 		return
 	}
 
@@ -450,6 +450,11 @@ func (cfg *apiConfig) handlerUpdateCredentials(w http.ResponseWriter, r *http.Re
 		HashedPassword: hashedPassword,
 		ID:             userID,
 	})
+	if err != nil {
+		log.Print(fmt.Errorf("%v couldn't update credentials in the database: %w", errorTag, err))
+		respondWithError(w, http.StatusInternalServerError, "database error: couldn't revoke refresh token")
+		return
+	}
 
 	log.Printf("%v user %q created", successTag, user.Email)
 	respondWithJSON(w, http.StatusOK, addTagsToUser(user, "", ""))
@@ -478,7 +483,7 @@ func (cfg *apiConfig) handlerDELETEChirpByID(w http.ResponseWriter, r *http.Requ
 	jwt, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		log.Print(fmt.Errorf("%v getting bearer token: %w", warningTag, err))
-		respondWithError(w, http.StatusUnauthorized, "invalid request")
+		respondWithError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
 	userID, err := auth.ValidateJWT(jwt, cfg.signingSecret)
